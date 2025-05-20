@@ -1,0 +1,126 @@
+from rest_framework import generics, status, permissions
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.utils import timezone
+from .models import Member, GymSession
+from .serializers import MemberSerializer, MemberUpdateSerializer, GymSessionSerializer
+
+class RegisterView(generics.CreateAPIView):
+    queryset = Member.objects.all()
+    serializer_class = MemberSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        
+        refresh = RefreshToken.for_user(user)
+        
+        return Response({
+            'user': MemberSerializer(user).data,
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        }, status=status.HTTP_201_CREATED)
+
+class LoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+    
+    def post(self, request, *args, **kwargs):
+        phone_number = request.data.get('phone_number')
+        password = request.data.get('password')
+        
+        if not phone_number or not password:
+            return Response({'error': 'Please provide both phone number and password'}, 
+                            status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            user = Member.objects.get(phone_number=phone_number)
+        except Member.DoesNotExist:
+            return Response({'error': 'No user found with this phone number'}, 
+                            status=status.HTTP_404_NOT_FOUND)
+        
+        if not user.check_password(password):
+            return Response({'error': 'Invalid credentials'}, 
+                            status=status.HTTP_401_UNAUTHORIZED)
+        
+        refresh = RefreshToken.for_user(user)
+        
+        return Response({
+            'user': MemberSerializer(user).data,
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        })
+
+class MemberListView(generics.ListAPIView):
+    queryset = Member.objects.all()
+    serializer_class = MemberSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+class MemberDetailView(generics.RetrieveUpdateAPIView):
+    queryset = Member.objects.all()
+    serializer_class = MemberUpdateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return MemberSerializer
+        return MemberUpdateSerializer
+    
+    def get_permissions(self):
+        if self.request.method in ['PUT', 'PATCH']:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
+
+class MemberEnterGymView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request, pk):
+        try:
+            member = Member.objects.get(pk=pk)
+        except Member.DoesNotExist:
+            return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if user is trying to update their own record or is admin
+        if request.user.pk != pk and not request.user.is_staff:
+            return Response({'error': 'You do not have permission to perform this action'}, 
+                            status=status.HTTP_403_FORBIDDEN)
+        
+        if member.is_in_gym:
+            return Response({'error': 'Member is already in the gym'}, 
+                            status=status.HTTP_400_BAD_REQUEST)
+        
+        member.enter_gym()
+        return Response({'success': 'Member has entered the gym'})
+
+class MemberExitGymView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request, pk):
+        try:
+            member = Member.objects.get(pk=pk)
+        except Member.DoesNotExist:
+            return Response({'error': 'Member not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if user is trying to update their own record or is admin
+        if request.user.pk != pk and not request.user.is_staff:
+            return Response({'error': 'You do not have permission to perform this action'}, 
+                            status=status.HTTP_403_FORBIDDEN)
+        
+        if not member.is_in_gym:
+            return Response({'error': 'Member is not in the gym'}, 
+                            status=status.HTTP_400_BAD_REQUEST)
+        
+        member.exit_gym()
+        return Response({'success': 'Member has exited the gym and session has been recorded'})
+
+class GymSessionListView(generics.ListAPIView):
+    serializer_class = GymSessionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff:
+            return GymSession.objects.all().order_by('-entry_time')
+        return GymSession.objects.filter(member=user).order_by('-entry_time')
