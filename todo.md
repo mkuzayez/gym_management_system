@@ -26,6 +26,6 @@
 - [x] Document all endpoints
 
 ## GitHub
-- [ ] Initialize Git repository
-- [ ] Create .gitignore file
-- [ ] Push to GitHub
+- [x] Initialize Git repository
+- [x] Create .gitignore file
+- [x] Push to GitHub
