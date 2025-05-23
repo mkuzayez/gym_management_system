@@ -5,11 +5,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 from .models import Member, GymSession
 from .serializers import MemberSerializer, MemberUpdateSerializer, GymSessionSerializer
-from rest_framework import status
-from rest_framework.response import Response
-from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from .serializers import MemberRegistrationSerializer, MemberLoginSerializer
+from .permissions import HasActiveSubscription
 
 
 class RegisterView(generics.CreateAPIView):
@@ -60,11 +58,24 @@ class LoginView(APIView):
                 {"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED
             )
 
+        # Check if the member has an active subscription
+        if not user.has_active_subscription:
+            return Response(
+                {
+                    "error": "Your subscription has expired. Please renew your subscription to continue."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         refresh = RefreshToken.for_user(user)
 
         return Response(
             {
-                "user": MemberSerializer(user).data,
+                "user": {
+                    "id": user.id,
+                    "name": user.name,
+                    "phone_number": user.phone_number,
+                },
                 "refresh": str(refresh),
                 "access": str(refresh.access_token),
             }
@@ -74,14 +85,13 @@ class LoginView(APIView):
 class MemberListView(generics.ListAPIView):
     queryset = Member.objects.all()
     serializer_class = MemberSerializer
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [permissions.IsAdminUser]  # Admin only, no change needed
 
 
 class MemberDetailView(generics.RetrieveUpdateAPIView):
     queryset = Member.objects.all()
     serializer_class = MemberUpdateSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
+    
     def get_serializer_class(self):
         if self.request.method == "GET":
             return MemberSerializer
@@ -90,11 +100,11 @@ class MemberDetailView(generics.RetrieveUpdateAPIView):
     def get_permissions(self):
         if self.request.method in ["PUT", "PATCH"]:
             return [permissions.IsAdminUser()]
-        return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), HasActiveSubscription()]
 
 
 class MemberEnterGymView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasActiveSubscription]
 
     def post(self, request, pk):
         try:
@@ -122,7 +132,7 @@ class MemberEnterGymView(APIView):
 
 
 class MemberExitGymView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasActiveSubscription]
 
     def post(self, request, pk):
         try:
@@ -153,7 +163,7 @@ class MemberExitGymView(APIView):
 
 class GymSessionListView(generics.ListAPIView):
     serializer_class = GymSessionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasActiveSubscription]
 
     def get_queryset(self):
         user = self.request.user
@@ -163,7 +173,7 @@ class GymSessionListView(generics.ListAPIView):
 
 
 class MemberRegistrationView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [AllowAny]  # No change needed for registration
 
     def post(self, request):
         serializer = MemberRegistrationSerializer(data=request.data)
@@ -188,11 +198,24 @@ class MemberLoginView(APIView):
         serializer = MemberLoginSerializer(data=request.data)
         if serializer.is_valid():
             validated_data = serializer.validated_data
+            member = validated_data["member"]
+
+            # Check if the member has an active subscription
+            if not member.has_active_subscription:
+                return Response(
+                    {
+                        "error": "Your subscription has expired. Please renew your subscription to continue."
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
             return Response(
                 {
-                    "member_id": validated_data["member"].id,
-                    "name": validated_data["member"].name,
-                    "phone_number": validated_data["member"].phone_number,
+                    "user": {
+                        "id": member.id,
+                        "name": member.name,
+                        "phone_number": member.phone_number,
+                    },
                     "refresh": validated_data["refresh"],
                     "access": validated_data["access"],
                 },
