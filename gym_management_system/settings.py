@@ -16,6 +16,8 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
+APPEND_SLASH=False 
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -29,7 +31,6 @@ INSTALLED_APPS = [
     # Third-party apps
     'rest_framework',
     'rest_framework_simplejwt',
-    'drf_yasg',
     
     # Local apps
     'gym',
@@ -158,3 +159,6 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
 }
+
+# Add this to your settings.py
+AUTH_USER_MODEL = 'gym.Member'

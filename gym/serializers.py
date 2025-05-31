@@ -1,13 +1,13 @@
 from rest_framework import serializers
 from .models import Member, GymSession
-from rest_framework import serializers
-from django.contrib.auth.models import User
-from .models import Member
 from rest_framework_simplejwt.tokens import RefreshToken
+from django.utils import timezone
 
 
 class MemberSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, required=True)
+    phone_number = serializers.CharField(required=True)
+    name = serializers.CharField(required=True)
 
     class Meta:
         model = Member
@@ -25,6 +25,10 @@ class MemberSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "date_joined", "is_in_gym")
 
     def create(self, validated_data):
+        # Ensure subscription_start is set to today if not provided
+        if 'subscription_start' not in validated_data:
+            validated_data['subscription_start'] = timezone.now().date()
+            
         user = Member.objects.create_user(
             phone_number=validated_data["phone_number"],
             name=validated_data["name"],
@@ -39,32 +43,6 @@ class MemberUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Member
         fields = ("name", "subscription_start", "subscription_end")
-
-
-class MemberRegistrationSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
-    phone_number = serializers.CharField(required=True)
-    name = serializers.CharField(required=True)
-
-    class Meta:
-        model = Member
-        fields = (
-            "phone_number",
-            "name",
-            "password",
-            "subscription_start",
-            "subscription_end",
-        )
-
-    def create(self, validated_data):
-        password = validated_data.pop("password")
-        # Create User for authentication
-        user = User.objects.create_user(
-            username=validated_data["phone_number"], password=password
-        )
-        # Create Member profile
-        member = Member.objects.create(**validated_data)
-        return member
 
 
 class MemberLoginSerializer(serializers.Serializer):
@@ -83,16 +61,12 @@ class MemberLoginSerializer(serializers.Serializer):
                 "Member with this phone number does not exist"
             )
 
-        # Check if user exists and password is correct
-        try:
-            user = User.objects.get(username=phone_number)
-            if not user.check_password(password):
-                raise serializers.ValidationError("Incorrect password")
-        except User.DoesNotExist:
-            raise serializers.ValidationError("Authentication credentials not found")
+        # Check if password is correct
+        if not member.check_password(password):
+            raise serializers.ValidationError("Incorrect password")
 
         # Generate tokens
-        refresh = RefreshToken.for_user(user)
+        refresh = RefreshToken.for_user(member)
 
         return {
             "member": member,
@@ -108,3 +82,32 @@ class GymSessionSerializer(serializers.ModelSerializer):
         model = GymSession
         fields = ("id", "member", "member_name", "entry_time", "exit_time", "duration")
         read_only_fields = ("id", "member_name", "duration")
+
+
+class MemberRegistrationSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=True)
+    phone_number = serializers.CharField(required=True)
+    name = serializers.CharField(required=True)
+
+    class Meta:
+        model = Member
+        fields = (
+            "phone_number",
+            "name",
+            "password",
+            "subscription_start",
+            "subscription_end",
+        )
+
+    def create(self, validated_data):
+        # Ensure subscription_start is set to today if not provided
+        if 'subscription_start' not in validated_data:
+            validated_data['subscription_start'] = timezone.now().date()
+            
+        return Member.objects.create_user(
+            phone_number=validated_data["phone_number"],
+            name=validated_data["name"],
+            password=validated_data["password"],
+            subscription_start=validated_data.get("subscription_start"),
+            subscription_end=validated_data.get("subscription_end"),
+        )
