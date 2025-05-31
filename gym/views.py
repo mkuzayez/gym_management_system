@@ -4,69 +4,34 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 from .models import Member, GymSession
-from .serializers import MemberSerializer, MemberUpdateSerializer, GymSessionSerializer
-from rest_framework.permissions import AllowAny
-from .serializers import MemberRegistrationSerializer, MemberLoginSerializer
+from .serializers import (
+    MemberSerializer, 
+    MemberUpdateSerializer, 
+    GymSessionSerializer,
+    LoginSerializer
+)
 from .permissions import HasActiveSubscription
 
 
 class RegisterView(generics.CreateAPIView):
+    """
+    API endpoint for member registration
+    Returns user data and authentication tokens
+    """
     queryset = Member.objects.all()
     serializer_class = MemberSerializer
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        
+        if not serializer.is_valid():
+            return Response(
+                {"error": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
         user = serializer.save()
-
-        refresh = RefreshToken.for_user(user)
-
-        return Response(
-            {
-                "user": MemberSerializer(user).data,
-                "refresh": str(refresh),
-                "access": str(refresh.access_token),
-            },
-            status=status.HTTP_201_CREATED,
-        )
-
-
-class LoginView(APIView):
-    permission_classes = [permissions.AllowAny]
-
-    def post(self, request, *args, **kwargs):
-        phone_number = request.data.get("phone_number")
-        password = request.data.get("password")
-
-        if not phone_number or not password:
-            return Response(
-                {"error": "Please provide both phone number and password"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            user = Member.objects.get(phone_number=phone_number)
-        except Member.DoesNotExist:
-            return Response(
-                {"error": "No user found with this phone number"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if not user.check_password(password):
-            return Response(
-                {"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED
-            )
-
-        # Check if the member has an active subscription
-        if not user.has_active_subscription:
-            return Response(
-                {
-                    "error": "Your subscription has expired. Please renew your subscription to continue."
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         refresh = RefreshToken.for_user(user)
 
         return Response(
@@ -75,22 +40,71 @@ class LoginView(APIView):
                     "id": user.id,
                     "name": user.name,
                     "phone_number": user.phone_number,
+                    "subscription_start": user.subscription_start,
+                    "subscription_end": user.subscription_end,
+                    "has_active_subscription": user.has_active_subscription,
                 },
                 "refresh": str(refresh),
                 "access": str(refresh.access_token),
-            }
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class LoginView(APIView):
+    """
+    API endpoint for member login
+    Returns user data and authentication tokens
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = LoginSerializer(data=request.data)
+        
+        if not serializer.is_valid():
+            # The serializer's validate method already formats errors properly
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        validated_data = serializer.validated_data
+        member = validated_data["member"]
+
+        return Response(
+            {
+                "user": {
+                    "id": member.id,
+                    "name": member.name,
+                    "phone_number": member.phone_number,
+                    "subscription_start": member.subscription_start,
+                    "subscription_end": member.subscription_end,
+                    "has_active_subscription": member.has_active_subscription,
+                },
+                "refresh": validated_data["refresh"],
+                "access": validated_data["access"],
+            },
+            status=status.HTTP_200_OK,
         )
 
 
 class MemberListView(generics.ListAPIView):
+    """
+    API endpoint to list all members
+    Only accessible by admin users
+    """
     queryset = Member.objects.all()
     serializer_class = MemberSerializer
-    permission_classes = [permissions.IsAdminUser]  # Admin only, no change needed
+    permission_classes = [permissions.IsAdminUser]
 
 
 class MemberDetailView(generics.RetrieveUpdateAPIView):
+    """
+    API endpoint to retrieve and update member details
+    GET: Accessible by the member themselves or admin
+    PUT/PATCH: Only accessible by admin
+    """
     queryset = Member.objects.all()
-    serializer_class = MemberUpdateSerializer
     
     def get_serializer_class(self):
         if self.request.method == "GET":
@@ -104,6 +118,9 @@ class MemberDetailView(generics.RetrieveUpdateAPIView):
 
 
 class MemberEnterGymView(APIView):
+    """
+    API endpoint for recording member entry to the gym
+    """
     permission_classes = [permissions.IsAuthenticated, HasActiveSubscription]
 
     def post(self, request, pk):
@@ -111,27 +128,32 @@ class MemberEnterGymView(APIView):
             member = Member.objects.get(pk=pk)
         except Member.DoesNotExist:
             return Response(
-                {"error": "Member not found"}, status=status.HTTP_404_NOT_FOUND
+                {"error": "Member not found"},
+                status=status.HTTP_404_NOT_FOUND
             )
 
         # Check if user is trying to update their own record or is admin
         if request.user.pk != pk and not request.user.is_staff:
             return Response(
-                {"error": "You do not have permission to perform this action"},
-                status=status.HTTP_403_FORBIDDEN,
+                {"error": "You can only update your own gym status"},
+                status=status.HTTP_403_FORBIDDEN
             )
 
-        if member.is_in_gym:
+        success, message = member.enter_gym()
+        
+        if not success:
             return Response(
-                {"error": "Member is already in the gym"},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": message},
+                status=status.HTTP_400_BAD_REQUEST
             )
-
-        member.enter_gym()
-        return Response({"success": "Member has entered the gym"})
+            
+        return Response({"success": message})
 
 
 class MemberExitGymView(APIView):
+    """
+    API endpoint for recording member exit from the gym
+    """
     permission_classes = [permissions.IsAuthenticated, HasActiveSubscription]
 
     def post(self, request, pk):
@@ -139,86 +161,39 @@ class MemberExitGymView(APIView):
             member = Member.objects.get(pk=pk)
         except Member.DoesNotExist:
             return Response(
-                {"error": "Member not found"}, status=status.HTTP_404_NOT_FOUND
+                {"error": "Member not found"},
+                status=status.HTTP_404_NOT_FOUND
             )
 
         # Check if user is trying to update their own record or is admin
         if request.user.pk != pk and not request.user.is_staff:
             return Response(
-                {"error": "You do not have permission to perform this action"},
-                status=status.HTTP_403_FORBIDDEN,
+                {"error": "You can only update your own gym status"},
+                status=status.HTTP_403_FORBIDDEN
             )
 
-        if not member.is_in_gym:
+        success, message = member.exit_gym()
+        
+        if not success:
             return Response(
-                {"error": "Member is not in the gym"},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": message},
+                status=status.HTTP_400_BAD_REQUEST
             )
-
-        member.exit_gym()
-        return Response(
-            {"success": "Member has exited the gym and session has been recorded"}
-        )
+            
+        return Response({"success": message})
 
 
 class GymSessionListView(generics.ListAPIView):
+    """
+    API endpoint to list gym sessions
+    Admin: Can view all sessions
+    Members: Can only view their own sessions
+    """
     serializer_class = GymSessionSerializer
     permission_classes = [permissions.IsAuthenticated, HasActiveSubscription]
 
     def get_queryset(self):
         user = self.request.user
         if user.is_staff:
-            return GymSession.objects.all().order_by("-entry_time")
-        return GymSession.objects.filter(member=user).order_by("-entry_time")
-
-
-class MemberRegistrationView(APIView):
-    permission_classes = [AllowAny]  # No change needed for registration
-
-    def post(self, request):
-        serializer = MemberRegistrationSerializer(data=request.data)
-        if serializer.is_valid():
-            member = serializer.save()
-            return Response(
-                {
-                    "message": "Member registered successfully",
-                    "member_id": member.id,
-                    "name": member.name,
-                    "phone_number": member.phone_number,
-                },
-                status=status.HTTP_201_CREATED,
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class MemberLoginView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = MemberLoginSerializer(data=request.data)
-        if serializer.is_valid():
-            validated_data = serializer.validated_data
-            member = validated_data["member"]
-
-            # Check if the member has an active subscription
-            if not member.has_active_subscription:
-                return Response(
-                    {
-                        "error": "Your subscription has expired. Please renew your subscription to continue."
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-            return Response(
-                {
-                    "user": {
-                        "id": member.id,
-                        "name": member.name,
-                        "phone_number": member.phone_number,
-                    },
-                    "refresh": validated_data["refresh"],
-                    "access": validated_data["access"],
-                },
-                status=status.HTTP_200_OK,
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return GymSession.objects.all()
+        return GymSession.objects.filter(member=user)

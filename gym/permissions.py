@@ -3,8 +3,9 @@ from rest_framework import permissions
 class HasActiveSubscription(permissions.BasePermission):
     """
     Custom permission to only allow members with active subscriptions.
+    Provides user-friendly error message for expired subscriptions.
     """
-    message = "Your subscription has expired. Please renew your subscription to continue."
+    message = {"error": "Your subscription has expired. Please renew your subscription to continue."}
 
     def has_permission(self, request, view):
         # Allow unauthenticated requests to pass (they'll be handled by other permission classes)
@@ -19,5 +20,5 @@ class HasActiveSubscription(permissions.BasePermission):
         try:
             member = request.user
             return member.has_active_subscription
-        except:
+        except Exception:
             return False

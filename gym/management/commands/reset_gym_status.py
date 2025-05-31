@@ -3,6 +3,13 @@ from django.utils import timezone
 from gym.models import Member
 
 class Command(BaseCommand):
+    """
+    Management command to reset gym status for all members
+    
+    This command is intended to be run daily at midnight to ensure
+    that any members who forgot to check out are properly logged out
+    and their sessions are recorded.
+    """
     help = 'Reset is_in_gym status for all members at midnight'
 
     def handle(self, *args, **options):
@@ -13,7 +20,8 @@ class Command(BaseCommand):
         # For each member in the gym, create a session and set is_in_gym to False
         for member in members_in_gym:
             if member.entry_time:
-                member.exit_gym()  # This will create a session and set is_in_gym to False
+                # This will create a session and set is_in_gym to False
+                member.exit_gym()  
             else:
                 # If no entry time is recorded, just set is_in_gym to False
                 member.is_in_gym = False
