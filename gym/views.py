@@ -197,3 +197,26 @@ class GymSessionListView(generics.ListAPIView):
         if user.is_staff:
             return GymSession.objects.all()
         return GymSession.objects.filter(member=user)
+
+
+class InGymMembersView(generics.ListAPIView):
+    """
+    API endpoint to list all members currently in the gym
+    Accessible by any authenticated member with active subscription
+    """
+    serializer_class = MemberSerializer
+    permission_classes = [permissions.IsAuthenticated, HasActiveSubscription]
+    
+    def get_queryset(self):
+        """Return only members who are currently in the gym"""
+        return Member.objects.filter(is_in_gym=True)
+    
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        
+        # Add count of members in gym to response
+        return Response({
+            "count": queryset.count(),
+            "members": serializer.data
+        })

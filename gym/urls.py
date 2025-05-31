@@ -11,6 +11,7 @@ urlpatterns = [
     # Member endpoints
     path('members/', views.MemberListView.as_view(), name='member-list'),
     path('members/<int:pk>/', views.MemberDetailView.as_view(), name='member-detail'),
+    path('members/in-gym/', views.InGymMembersView.as_view(), name='members-in-gym'),
     
     # Gym session tracking endpoints
     path('members/<int:pk>/enter/', views.MemberEnterGymView.as_view(), name='member-enter'),
