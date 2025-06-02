@@ -17,4 +17,7 @@ urlpatterns = [
     path('members/<int:pk>/enter/', views.MemberEnterGymView.as_view(), name='member-enter'),
     path('members/<int:pk>/exit/', views.MemberExitGymView.as_view(), name='member-exit'),
     path('sessions/', views.GymSessionListView.as_view(), name='session-list'),
+    
+    # New endpoint for recent sessions by member ID
+    path('sessions/<int:id>/', views.MemberRecentSessionsView.as_view(), name='member-recent-sessions'),
 ]
